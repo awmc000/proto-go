@@ -10,21 +10,47 @@ import (
 )
 
 type request struct {
-	Method	string
-	Number	int
+	Method	string `json:"method"`
+	Number	int `json:"number"`
+}
+
+type response struct {
+	Method string `json:"method"`
+	Prime bool `json:"prime"`
 }
 
 func handleConnection(c net.Conn) {
 	defer c.Close()
 
-	reader := bufio.NewReader(c)
-	msg, err := reader.ReadString('\n')
-	if err != nil {
-		log.Fatal("Listening err:", err)
+	for {
+		// Create a new buf reader and get line.
+		reader := bufio.NewReader(c)
+		msg, err := reader.ReadString('\n')
+		fmt.Println("msg: ", msg)
+		// Err fires if a string could not be read.
+		if err != nil {
+			c.Write([]byte("Err!"))
+			log.Fatal("Listening err:", err)
+			break
+		}
+		req := request{}
+		err = json.Unmarshal([]byte(msg), &req)
+		// Err if malformed.
+		if err != nil {
+			c.Write([]byte("Err!"))
+			log.Fatal("unmarshalling err:", err)
+			break
+		}
+		fmt.Println("req: ", req)
+		if (req.Method == "isPrime") {
+			res := &response{
+				Method: "isPrime",
+				Prime: false}
+			res_json, _ := json.Marshal(res)
+			fmt.Println("res: ", res_json)
+			c.Write(res_json)
+		}
 	}
-	req := request{}
-	json.Unmarshal([]byte(msg), &req)
-	fmt.Println(req)
 }
 
 func main() {
