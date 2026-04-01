@@ -197,7 +197,7 @@ int main(void) {
 
     printf("server: waiting for connections...\n");
 
-    std::vector<std::thread> workers;
+    std::vector<std::thread*> workers;
 
     while(1) {  // main accept() loop
         sin_size = sizeof their_addr;
@@ -214,9 +214,15 @@ int main(void) {
         printf("server: got connection from %s\n", s);
 
         std::thread worker(serve_client, new_fd);
-        workers.push_back(std::move(worker));
-        // worker.detach();
+        workers.push_back(&worker);
+        worker.detach();
     }
+
+    for (std::thread* worker : workers) {
+        (*worker).join();
+    }
+
+    close(sockfd);
 
     return 0;
 }
