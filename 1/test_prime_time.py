@@ -17,6 +17,7 @@ import json
 import math
 import socket
 import threading
+import time
 from typing import Any
 
 
@@ -29,6 +30,18 @@ def parse_args() -> argparse.Namespace:
         default=2.0,
         type=float,
         help="Socket timeout in seconds",
+    )
+    parser.add_argument(
+        "--clients",
+        default=8,
+        type=int,
+        help="Concurrent client count for multiclient stress tests",
+    )
+    parser.add_argument(
+        "--requests-per-client",
+        default=12,
+        type=int,
+        help="Requests each client sends during stress tests",
     )
     return parser.parse_args()
 
@@ -142,6 +155,23 @@ def open_connection(host: str, port: int, timeout: float) -> socket.socket:
     return sock
 
 
+def make_client_numbers(index: int, requests_per_client: int) -> list[Any]:
+    values: list[Any] = []
+    base = index * 1000
+
+    for offset in range(requests_per_client):
+        if offset % 4 == 0:
+            values.append(base + 2 + offset)
+        elif offset % 4 == 1:
+            values.append(base + 3 + offset)
+        elif offset % 4 == 2:
+            values.append(float(base + 5 + offset))
+        else:
+            values.append(base + 7.5 + offset)
+
+    return values
+
+
 def test_sequential_requests(host: str, port: int, timeout: float) -> None:
     cases = [
         2,
@@ -224,6 +254,102 @@ def test_five_simultaneous_clients(host: str, port: int, timeout: float) -> None
         raise AssertionError("Concurrent client test failed:\n" + "\n".join(errors))
 
 
+def run_concurrent_clients(
+    host: str,
+    port: int,
+    timeout: float,
+    client_count: int,
+    requests_per_client: int,
+    send_delay: float = 0.0,
+) -> None:
+    errors: list[str] = []
+    lock = threading.Lock()
+    start = threading.Barrier(client_count)
+
+    def worker(index: int) -> None:
+        try:
+            with open_connection(host, port, timeout) as sock:
+                numbers = make_client_numbers(index, requests_per_client)
+                start.wait(timeout=timeout)
+                for number in numbers:
+                    send_line(sock, json.dumps({"method": "isPrime", "number": number}))
+                    expect_valid_response(sock, number)
+                    if send_delay > 0:
+                        time.sleep(send_delay)
+        except Exception as exc:
+            with lock:
+                errors.append(f"client {index}: {exc}")
+
+    threads = [threading.Thread(target=worker, args=(i,)) for i in range(client_count)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    if errors:
+        raise AssertionError("Concurrent client test failed:\n" + "\n".join(errors))
+
+
+def test_concurrent_burst_clients(
+    host: str,
+    port: int,
+    timeout: float,
+    client_count: int,
+    requests_per_client: int,
+) -> None:
+    run_concurrent_clients(
+        host,
+        port,
+        timeout,
+        client_count=client_count,
+        requests_per_client=requests_per_client,
+    )
+
+
+def test_slow_and_fast_clients_together(
+    host: str,
+    port: int,
+    timeout: float,
+    client_count: int,
+) -> None:
+    errors: list[str] = []
+    lock = threading.Lock()
+    start = threading.Barrier(client_count)
+
+    def worker(index: int) -> None:
+        delay = 0.15 if index == 0 else 0.0
+        numbers = make_client_numbers(index, 6)
+        try:
+            with open_connection(host, port, timeout) as sock:
+                start.wait(timeout=timeout)
+                for number in numbers:
+                    send_line(sock, json.dumps({"method": "isPrime", "number": number}))
+                    expect_valid_response(sock, number)
+                    if delay:
+                        time.sleep(delay)
+        except Exception as exc:
+            with lock:
+                errors.append(f"client {index}: {exc}")
+
+    threads = [threading.Thread(target=worker, args=(i,)) for i in range(client_count)]
+    started_at = time.monotonic()
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    elapsed = time.monotonic() - started_at
+
+    if errors:
+        raise AssertionError("Mixed-speed client test failed:\n" + "\n".join(errors))
+
+    slow_client_expected = 6 * 0.15
+    if elapsed >= slow_client_expected + 1.0:
+        raise AssertionError(
+            "Fast clients appear to have been blocked behind a slow client; "
+            f"elapsed={elapsed:.2f}s"
+        )
+
+
 def main() -> int:
     args = parse_args()
 
@@ -232,6 +358,18 @@ def main() -> int:
         ("extraneous fields", test_extraneous_fields),
         ("malformed requests", test_malformed_requests),
         ("five simultaneous clients", test_five_simultaneous_clients),
+        (
+            f"burst concurrency ({args.clients} clients x {args.requests_per_client} requests)",
+            lambda host, port, timeout: test_concurrent_burst_clients(
+                host, port, timeout, args.clients, args.requests_per_client
+            ),
+        ),
+        (
+            f"mixed-speed clients ({args.clients} concurrent)",
+            lambda host, port, timeout: test_slow_and_fast_clients_together(
+                host, port, timeout, max(5, args.clients)
+            ),
+        ),
     ]
 
     for name, test in tests:

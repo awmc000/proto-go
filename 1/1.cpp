@@ -82,8 +82,14 @@ void serve_client(int file_desc) {
     while (1) {
         memset(buf, 0, 1024);
 
-        if (recv(file_desc, buf, 1024, 0) == -1) {
+        int bytes_received;
+        if ((bytes_received = recv(file_desc, buf, 1024, 0)) == -1) {
             perror("send");
+        }
+
+        if (bytes_received == 0) {
+            send_failure(file_desc);
+            return;
         }
 
         std::string buf_s{buf};
@@ -216,10 +222,6 @@ int main(void) {
         std::thread worker(serve_client, new_fd);
         workers.push_back(&worker);
         worker.detach();
-    }
-
-    for (std::thread* worker : workers) {
-        (*worker).join();
     }
 
     close(sockfd);
