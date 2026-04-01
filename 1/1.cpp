@@ -27,6 +27,25 @@
 
 using json = nlohmann::json;
 
+bool is_prime_i(int n) {
+    if (n < 2) {
+        return false;
+    }
+    // Check if N is divisible by any number between 1 and sqrt(N)
+    for (int i = 2; i * i <= n; i++) {
+        if (n % i == 0) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool is_prime(double n) {
+    if (n != (int)n) {
+        return false;
+    }
+    return is_prime_i((int)n);
+}
 
 void sigchld_handler(int s) {
     (void)s; // quiet unused variable warning
@@ -48,37 +67,68 @@ void *get_in_addr(struct sockaddr *sa) {
     return &(((struct sockaddr_in6*)sa)->sin6_addr);
 }
 
+void send_failure(int file_desc) {
+    std::cout << "SENDING BAD RESPONSE!\n"<< std::endl;
+    std::string bad_response = "Bad request!\n";
+    send(file_desc, bad_response.c_str(), bad_response.length(), 0);
+    close(file_desc);
+    return;
+}
+
 void serve_client(int file_desc) {
 
     char buf[1024];
-    memset(buf, 0, 1024);
+    
+    while (1) {
+        memset(buf, 0, 1024);
 
-    if (recv(file_desc, buf, 1024, 0) == -1) {
-        perror("send");
+        if (recv(file_desc, buf, 1024, 0) == -1) {
+            perror("send");
+        }
+
+        std::string buf_s{buf};
+        json j_request;
+
+        try {
+            j_request = json::parse(buf_s);
+            std::cout << "RECEIVED:" << j_request << "\n";
+            bool has_keys = j_request.contains("method") && j_request.contains("number");
+            if (!has_keys) {
+                send_failure(file_desc);
+                return;
+            }
+            bool right_method = j_request["method"] == "isPrime";
+            if (!right_method) {
+                send_failure(file_desc);
+                return;
+            }
+            bool proper_types = 
+                (j_request["number"].type() == json::value_t::number_integer) ||
+                (j_request["number"].type() == json::value_t::number_unsigned) ||
+                (j_request["number"].type() == json::value_t::number_float);
+            if (!proper_types) {
+                send_failure(file_desc);
+                return;
+            }
+        } catch (nlohmann::json::parse_error) {
+            std::cout << "parse error" << std::endl;
+            send_failure(file_desc);
+            return;
+        }
+
+        using namespace nlohmann::literals;
+
+        json j_response = {
+            {"method", "isPrime"},
+            {"prime", is_prime(j_request["number"])}
+        };
+
+        std::string buf_re = j_response.dump() + "\n";
+
+        std::cout << "SENDING:" << buf_re << std::endl;
+
+        send(file_desc, buf_re.c_str(), buf_re.length(), 0);
     }
-
-    std::string buf_s{buf};
-
-    try {
-        json j_complete = json::parse(buf_s);
-        std::cout << std::setw(4) << j_complete << "\n\n";
-    } catch (nlohmann::json::parse_error) {
-        std::cout << "parse error" << std::endl;
-        send(file_desc, "BAD!", 5, 0);
-    }
-
-    using namespace nlohmann::literals;
-
-    json j_response = {
-        {"method", "isPrime"},
-        {"prime", false}
-    };
-
-    std::string buf_re = j_response.dump() + "\n";
-
-    send(file_desc, buf_re.c_str(), buf_re.length(), 0);
-
-    close(file_desc);
 }
 
 int main(void) {
