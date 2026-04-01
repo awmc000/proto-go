@@ -93,11 +93,12 @@ void serve_client(int file_desc) {
         }
 
         std::string buf_s{buf};
+        std::cout << "RECEIVED :" << buf_s << "\n";
         json j_request;
 
         try {
             j_request = json::parse(buf_s);
-            std::cout << "RECEIVED:" << j_request << "\n";
+            std::cout << "PARSE JSON :" << j_request << "\n";
             bool has_keys = j_request.contains("method") && j_request.contains("number");
             if (!has_keys) {
                 send_failure(file_desc);
