@@ -82,13 +82,29 @@ void serve_client(int file_desc) {
     while (1) {
         memset(buf, 0, 1024);
 
-        int bytes_received;
-        if ((bytes_received = recv(file_desc, buf, 1024, 0)) == -1) {
-            perror("send");
+        // Recv until newline, not just one recv buffer.
+        int bytes_received = 0;
+        int just_received;
+        bool has_newline = false;
+        while (!has_newline) {
+            if ((just_received = recv(file_desc, buf + bytes_received, 1024 - bytes_received, 0)) == -1) {
+                perror("send");
+                return;
+            }
+            if (just_received == 0) {
+                return;
+            }
+            for (char* pc = buf + bytes_received; *pc != 0; ++pc) {
+                if (*pc == '\n') {
+                    has_newline = true;
+                    break;
+                }
+            }
+            bytes_received += just_received;
         }
 
+
         if (bytes_received == 0) {
-            send_failure(file_desc);
             return;
         }
 
