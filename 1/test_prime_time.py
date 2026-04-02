@@ -253,6 +253,29 @@ def test_five_simultaneous_clients(host: str, port: int, timeout: float) -> None
     if errors:
         raise AssertionError("Concurrent client test failed:\n" + "\n".join(errors))
 
+def test_big_numbers(host: str, port: int, timeout: float) -> None:
+    cases = [
+        (9007199254740993, False),
+        (9007199254740997, True),
+        (9999999999999999, False),
+    ]
+
+    with open_connection(host, port, timeout) as sock:
+        for number, expected in cases:
+            send_line(sock, json.dumps({"method": "isPrime", "number": number}))
+            response = recv_json(sock)
+
+            if response.get("method") != "isPrime":
+                raise AssertionError(f"Unexpected method in response: {response!r}")
+
+            actual = response.get("prime")
+            if not isinstance(actual, bool):
+                raise AssertionError(f"Response prime field must be boolean: {response!r}")
+            if actual != expected:
+                raise AssertionError(
+                    f"Incorrect primality result for {number!r}: expected {expected}, got {actual}"
+                )
+
 
 def run_concurrent_clients(
     host: str,
@@ -358,6 +381,7 @@ def main() -> int:
         ("extraneous fields", test_extraneous_fields),
         ("malformed requests", test_malformed_requests),
         ("five simultaneous clients", test_five_simultaneous_clients),
+        ("big numbers", test_big_numbers),
         (
             f"burst concurrency ({args.clients} clients x {args.requests_per_client} requests)",
             lambda host, port, timeout: test_concurrent_burst_clients(

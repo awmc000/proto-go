@@ -127,7 +127,7 @@ void serve_client(int file_desc) {
 
         json j_response = {
             {"method", "isPrime"},
-            {"prime", is_prime(j_request["number"])}
+            {"prime", j_request["number"].type() == json::value_t::number_float ? is_prime(j_request["number"]) : is_prime_i(j_request["number"])}
         };
 
         std::string buf_re = j_response.dump() + "\n";
