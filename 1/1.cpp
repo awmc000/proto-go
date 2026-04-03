@@ -20,6 +20,7 @@
 
 #include <iostream>
 #include <thread>
+#include <string>
 #include <nlohmann/json.hpp>
 
 #define PORT "7007"
@@ -110,49 +111,53 @@ void serve_client(int file_desc) {
             return;
         }
 
-        std::string buf_s{buf};
-        std::cout << "[" << this_id << "] RECEIVED :" << buf_s << "\n";
-        json j_request;
+        std::istringstream input;
+        input.str(buf);
+        for (std::string line; std::getline(input, line);) {
+            std::string buf_s{line};
+            std::cout << "[" << this_id << "] RECEIVED :" << buf_s << "\n";
+            json j_request;
 
-        try {
-            j_request = json::parse(buf_s);
-            std::cout << "[" << this_id << "] PARSE JSON :" << j_request << "\n";
-            bool has_keys = j_request.contains("method") && j_request.contains("number");
-            if (!has_keys) {
+            try {
+                j_request = json::parse(buf_s);
+                std::cout << "[" << this_id << "] PARSE JSON :" << j_request << "\n";
+                bool has_keys = j_request.contains("method") && j_request.contains("number");
+                if (!has_keys) {
+                    send_failure(file_desc);
+                    return;
+                }
+                bool right_method = j_request["method"] == "isPrime";
+                if (!right_method) {
+                    send_failure(file_desc);
+                    return;
+                }
+                bool proper_types = 
+                    (j_request["number"].type() == json::value_t::number_integer) ||
+                    (j_request["number"].type() == json::value_t::number_unsigned) ||
+                    (j_request["number"].type() == json::value_t::number_float);
+                if (!proper_types) {
+                    send_failure(file_desc);
+                    return;
+                }
+            } catch (nlohmann::json::parse_error) {
+                std::cout << "[" << this_id << "] parse error" << std::endl;
                 send_failure(file_desc);
                 return;
             }
-            bool right_method = j_request["method"] == "isPrime";
-            if (!right_method) {
-                send_failure(file_desc);
-                return;
-            }
-            bool proper_types = 
-                (j_request["number"].type() == json::value_t::number_integer) ||
-                (j_request["number"].type() == json::value_t::number_unsigned) ||
-                (j_request["number"].type() == json::value_t::number_float);
-            if (!proper_types) {
-                send_failure(file_desc);
-                return;
-            }
-        } catch (nlohmann::json::parse_error) {
-            std::cout << "[" << this_id << "] parse error" << std::endl;
-            send_failure(file_desc);
-            return;
+
+            using namespace nlohmann::literals;
+
+            json j_response = {
+                {"method", "isPrime"},
+                {"prime", j_request["number"].type() == json::value_t::number_float ? is_prime(j_request["number"]) : is_prime_i(j_request["number"])}
+            };
+
+            std::string buf_re = j_response.dump() + "\n";
+
+            std::cout << "[" << this_id << "] SENDING:" << buf_re << std::endl;
+
+            send(file_desc, buf_re.c_str(), buf_re.length(), 0);
         }
-
-        using namespace nlohmann::literals;
-
-        json j_response = {
-            {"method", "isPrime"},
-            {"prime", j_request["number"].type() == json::value_t::number_float ? is_prime(j_request["number"]) : is_prime_i(j_request["number"])}
-        };
-
-        std::string buf_re = j_response.dump() + "\n";
-
-        std::cout << "[" << this_id << "] SENDING:" << buf_re << std::endl;
-
-        send(file_desc, buf_re.c_str(), buf_re.length(), 0);
     }
 }
 
