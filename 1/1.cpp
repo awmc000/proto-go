@@ -68,7 +68,8 @@ void *get_in_addr(struct sockaddr *sa) {
 }
 
 void send_failure(int file_desc) {
-    std::cout << "SENDING BAD RESPONSE!\n"<< std::endl;
+    std::thread::id this_id = std::this_thread::get_id();
+    std::cout << "[" << this_id << "] SENDING BAD RESPONSE!\n" << std::endl;
     std::string bad_response = "Bad request!\n";
     send(file_desc, bad_response.c_str(), bad_response.length(), 0);
     close(file_desc);
@@ -80,6 +81,7 @@ void serve_client(int file_desc) {
     char buf[1024];
     
     while (1) {
+        std::thread::id this_id = std::this_thread::get_id();
         memset(buf, 0, 1024);
 
         // Recv until newline, not just one recv buffer.
@@ -109,12 +111,12 @@ void serve_client(int file_desc) {
         }
 
         std::string buf_s{buf};
-        std::cout << "RECEIVED :" << buf_s << "\n";
+        std::cout << "[" << this_id << "] RECEIVED :" << buf_s << "\n";
         json j_request;
 
         try {
             j_request = json::parse(buf_s);
-            std::cout << "PARSE JSON :" << j_request << "\n";
+            std::cout << "[" << this_id << "] PARSE JSON :" << j_request << "\n";
             bool has_keys = j_request.contains("method") && j_request.contains("number");
             if (!has_keys) {
                 send_failure(file_desc);
@@ -134,7 +136,7 @@ void serve_client(int file_desc) {
                 return;
             }
         } catch (nlohmann::json::parse_error) {
-            std::cout << "parse error" << std::endl;
+            std::cout << "[" << this_id << "] parse error" << std::endl;
             send_failure(file_desc);
             return;
         }
@@ -148,13 +150,14 @@ void serve_client(int file_desc) {
 
         std::string buf_re = j_response.dump() + "\n";
 
-        std::cout << "SENDING:" << buf_re << std::endl;
+        std::cout << "[" << this_id << "] SENDING:" << buf_re << std::endl;
 
         send(file_desc, buf_re.c_str(), buf_re.length(), 0);
     }
 }
 
 int main(void) {
+    std::thread::id this_id = std::this_thread::get_id();
     // listen on sock_fd, new connection on new_fd
     int sockfd, new_fd;
     struct addrinfo hints, *servinfo, *p;
@@ -218,7 +221,7 @@ int main(void) {
         exit(1);
     }
 
-    printf("server: waiting for connections...\n");
+    std::cout << "[" << this_id << "] server: waiting for connections...\n";
 
     std::vector<std::thread*> workers;
 
@@ -234,11 +237,11 @@ int main(void) {
         inet_ntop(their_addr.ss_family,
             get_in_addr((struct sockaddr *)&their_addr),
             s, sizeof s);
-        printf("server: got connection from %s\n", s);
+        std::cout << "[" << this_id << "] server: got connection from " << s << "\n";
 
-        std::thread worker(serve_client, new_fd);
-        workers.push_back(&worker);
-        worker.detach();
+        std::thread* worker = new std::thread(serve_client, new_fd);
+        workers.push_back(worker);
+        worker->detach();
     }
 
     close(sockfd);
